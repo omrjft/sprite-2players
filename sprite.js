@@ -70,6 +70,144 @@ let lastCollisionTime = -10;
 let time = 0;
 
 // ---------------------------------------------------------------------------
+// Multijugador P2P (máximo 2 jugadores)
+// ---------------------------------------------------------------------------
+const ROOM_ID = 'juego-sprite-uruapan-sala-unica-2026';
+const statusEl = document.getElementById('netStatus');
+
+const remotePlayer = {
+    connected: false,
+    x: 0,
+    y: GROUND_Y,
+    vx: 0,
+    vy: 0,
+    facing: 1,
+    state: 'idle',
+    frame: 0,
+    frameTime: 0,
+    jumpTime: 0,
+    landTimer: 0,
+    collisions: 0
+};
+
+let role = 'connecting';
+let activeConn = null;
+let peer = null;
+
+function setNetworkStatus(text, color) {
+    statusEl.textContent = text;
+    statusEl.style.color = color;
+}
+
+function setupConnection(conn) {
+    activeConn = conn;
+
+    conn.on('open', () => {
+        remotePlayer.connected = true;
+        setNetworkStatus(
+            role === 'host'
+                ? '🟢 Eres Jugador 1 (Host) — Jugador 2 conectado'
+                : '🟢 Eres Jugador 2 — Conectado con Jugador 1',
+            '#4ade80'
+        );
+    });
+
+    conn.on('data', data => {
+        if (!data || typeof data !== 'object') return;
+
+        if (data.type === 'FULL') {
+            role = 'full';
+            remotePlayer.connected = false;
+            setNetworkStatus('🔴 Sala llena: ya hay 2 jugadores activos.', '#f87171');
+            conn.close();
+            return;
+        }
+
+        if (data.type === 'STATE' && data.state) {
+            Object.assign(remotePlayer, data.state);
+            remotePlayer.connected = true;
+        }
+    });
+
+    conn.on('close', () => {
+        remotePlayer.connected = false;
+        activeConn = null;
+
+        if (role === 'host') {
+            setNetworkStatus('🟡 Eres Jugador 1 (Host) — Esperando Jugador 2...', '#facc15');
+        } else if (role === 'guest') {
+            setNetworkStatus('🔴 El Jugador 1 cerró la partida. Recarga para volver a jugar.', '#f87171');
+        }
+    });
+}
+
+function initMultiplayer() {
+    if (typeof Peer === 'undefined') {
+        setNetworkStatus('🔴 No se pudo cargar PeerJS. Revisa tu conexión.', '#f87171');
+        return;
+    }
+
+    peer = new Peer(ROOM_ID);
+
+    peer.on('open', () => {
+        role = 'host';
+        setNetworkStatus('🟡 Eres Jugador 1 (Host) — Esperando Jugador 2...', '#facc15');
+    });
+
+    peer.on('connection', conn => {
+        if (activeConn && activeConn.open) {
+            conn.on('open', () => {
+                conn.send({ type: 'FULL' });
+                setTimeout(() => conn.close(), 150);
+            });
+            return;
+        }
+        setupConnection(conn);
+    });
+
+    peer.on('error', err => {
+        if (err.type === 'unavailable-id') {
+            peer.destroy();
+            role = 'guest';
+            peer = new Peer();
+
+            peer.on('open', () => {
+                const conn = peer.connect(ROOM_ID, { reliable: true });
+                setupConnection(conn);
+            });
+
+            peer.on('error', guestErr => {
+                setNetworkStatus('🔴 Error de red: ' + guestErr.type, '#f87171');
+            });
+        } else {
+            setNetworkStatus('🔴 Error de red: ' + err.type, '#f87171');
+        }
+    });
+}
+
+initMultiplayer();
+
+setInterval(() => {
+    if (activeConn && activeConn.open && role !== 'full') {
+        activeConn.send({
+            type: 'STATE',
+            state: {
+                x: player.x,
+                y: player.y,
+                vx: player.vx,
+                vy: player.vy,
+                facing: player.facing,
+                state: player.state,
+                frame: player.frame,
+                jumpTime: player.jumpTime,
+                landTimer: player.landTimer,
+                collisions
+            }
+        });
+    }
+}, 1000 / 30);
+
+// ---------------------------------------------------------------------------
 // Teclado
 // ---------------------------------------------------------------------------
 const keys = {};
@@ -412,6 +550,52 @@ function drawPlayer() {
     }
 }
 
+function drawRemotePlayer(screenX) {
+    let f;
+    if (remotePlayer.state === 'jump') {
+        let i = 2;
+        if (remotePlayer.jumpTime < 0.06) i = 0;
+        else if (remotePlayer.vy < -250) i = 1;
+        else if (remotePlayer.vy <= 150) i = 2;
+        else i = 3;
+        f = FRAMES.jump[i];
+    } else if (remotePlayer.landTimer > 0) {
+        f = FRAMES.jump[4];
+    } else {
+        f = FRAMES[remotePlayer.state][remotePlayer.frame] || FRAMES.idle[0];
+    }
+
+    if (sheetReady) {
+        ctx.save();
+        ctx.translate(screenX, remotePlayer.y);
+        ctx.scale(remotePlayer.facing * SPRITE_SCALE, SPRITE_SCALE);
+        ctx.filter = 'hue-rotate(150deg) saturate(1.4)';
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(sheet, f.sx, f.sy, f.sw, f.sh, -f.ax, -f.ay, f.sw, f.sh);
+        ctx.restore();
+    } else {
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(screenX - HIT_W / 2, remotePlayer.y - HIT_H, HIT_W, HIT_H);
+    }
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(role === 'host' ? 'J2' : 'J1', screenX, remotePlayer.y - HIT_H - 12);
+
+    const air = Math.max(0, GROUND_Y - remotePlayer.y);
+    ctx.fillStyle = 'rgba(0,0,0,' + Math.max(0.08, 0.3 - air / 600) + ')';
+    ctx.beginPath();
+    ctx.ellipse(screenX, GROUND_Y + 4, Math.max(8, 26 - air / 8), 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (showHitboxes) {
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(screenX - HIT_W / 2, remotePlayer.y - HIT_H, HIT_W, HIT_H);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // HUD
 // ---------------------------------------------------------------------------
@@ -419,15 +603,26 @@ const STATE_LABEL = { idle: 'PARADO', walk: 'CAMINANDO', run: 'CORRIENDO', jump:
 
 function drawHUD() {
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(10, 10, 210, 78);
+    ctx.fillRect(10, 10, 230, 96);
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 16px sans-serif';
+    ctx.font = 'bold 15px sans-serif';
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
-    ctx.fillText('Estado: ' + STATE_LABEL[player.state], 20, 18);
-    ctx.font = '14px sans-serif';
-    ctx.fillText('Distancia: ' + Math.max(0, Math.floor(player.x / 10)) + ' m', 20, 42);
-    ctx.fillText('Choques: ' + collisions, 20, 62);
+    const myTag = role === 'guest' ? 'Jugador 2' : 'Jugador 1';
+    ctx.fillText('Tú (' + myTag + '): ' + STATE_LABEL[player.state], 20, 16);
+    ctx.font = '13px sans-serif';
+    ctx.fillText('Tu distancia: ' + Math.max(0, Math.floor(player.x / 10)) + ' m', 20, 38);
+    ctx.fillText('Tus choques: ' + collisions, 20, 56);
+
+    if (remotePlayer.connected) {
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillText(
+            'Rival: ' + Math.max(0, Math.floor(remotePlayer.x / 10)) +
+            ' m (choques: ' + remotePlayer.collisions + ')',
+            20,
+            78
+        );
+    }
 
     if (time - lastCollisionTime < 0.6) {
         ctx.font = 'bold 28px sans-serif';
@@ -452,6 +647,10 @@ function draw() {
     drawTrees(camX);
     drawGround(camX);
     for (const o of visibleObstacles(camX)) drawObstacle(o, camX);
+
+    if (remotePlayer.connected) {
+        drawRemotePlayer(remotePlayer.x - camX);
+    }
     drawPlayer();
     drawHUD();
 }

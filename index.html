@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sprite: parado, caminar, correr y brincar</title>
+    <title>Sprite: Multijugador (2 Jugadores)</title>
     <style>
         body {
             display: flex;
@@ -15,6 +15,14 @@
             color: white;
             font-family: sans-serif;
             flex-direction: column;
+        }
+        #netStatus {
+            margin-bottom: 10px;
+            padding: 6px 14px;
+            border-radius: 6px;
+            background: #333;
+            font-weight: bold;
+            color: #4ade80;
         }
         canvas {
             max-width: 100%;
@@ -37,7 +45,8 @@
     </style>
 </head>
 <body>
-    <h2>Demo de sprite: parado, caminar, correr y brincar</h2>
+    <h2>Demo de sprite: 2 Jugadores</h2>
+    <div id="netStatus">Conectando a la sala...</div>
     <canvas id="gameCanvas" width="800" height="450"></canvas>
     <p>
         <kbd>←</kbd> <kbd>→</kbd> o <kbd>A</kbd> <kbd>D</kbd>: caminar &nbsp;|&nbsp;
@@ -45,8 +54,10 @@
         <kbd>Espacio</kbd> / <kbd>↑</kbd> / <kbd>W</kbd>: brincar &nbsp;|&nbsp;
         <kbd>H</kbd>: ver hitboxes
     </p>
-    <p>Sin tocar nada, el personaje se queda parado. Brinca las rocas y cajas para pasarlas.</p>
+    <p>Abre esta misma URL en otro navegador para que entre el Jugador 2.</p>
 
+    <!-- Librería PeerJS para conexión directa P2P en GitHub Pages -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script src="sprite.js"></script>
 </body>
 </html>
